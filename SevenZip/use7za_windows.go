@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 )
@@ -15,7 +14,7 @@ import (
 func init() {
 	lp, err := exec.LookPath(app7za)
 	if err == nil {
-		Path7za = lp
+		path7za = lp
 	} else {
 		if err = decompression7za(); err != nil {
 			panic(err)
@@ -25,15 +24,15 @@ func init() {
 
 func decompression7za() error {
 	var (
-		err   error
-		fw    *os.File
-		paths = filepath.SplitList(os.Getenv("path"))
+		err error
+		fw  *os.File
 	)
-	sort.Strings(paths)
-	for _, dir := range paths {
-		fw, err = os.Create(filepath.Join(dir, app7za+".exe"))
-		if err == nil {
-			break
+	for _, dir := range filepath.SplitList(os.Getenv("path")) {
+		if len(dir) > 3 { // must more than the "C:\","D:\"
+			fw, err = os.Create(filepath.Join(dir, app7za+".exe"))
+			if err == nil {
+				break
+			}
 		}
 	}
 	if err != nil {
@@ -51,14 +50,14 @@ func decompression7za() error {
 	if _, err = io.Copy(fw, zr); err != nil {
 		return err
 	}
-	Path7za = fw.Name()
+	path7za = fw.Name()
 	return nil
 }
 
 func command(arg ...string) *exec.Cmd {
-	cmd := &exec.Cmd{Path: Path7za, SysProcAttr: &syscall.SysProcAttr{HideWindow: true}}
+	cmd := &exec.Cmd{Path: path7za, SysProcAttr: &syscall.SysProcAttr{HideWindow: true}}
 	if len(arg) == 1 { // use CmdLine to exec
-		cmd.SysProcAttr.CmdLine = Path7za + " " + arg[0]
+		cmd.SysProcAttr.CmdLine = path7za + " " + arg[0]
 	} else {
 		cmd.Args = append([]string{app7za}, arg...)
 	}
