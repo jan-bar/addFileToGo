@@ -1,9 +1,22 @@
+/**
+本文件照抄官方SDK: [https://www.7-zip.org/a/lzma-specification.7z]
+本文件用法参考DecodeLzma.go
+
+懒得将压缩代码也抄一份,因为平时代码多数用解压,需要压缩就用下面的jar包吧
+lzma.jar: [https://www.7-zip.org/a/lzma1900.7z]的java代码打包,java版本:1.8.0_92
+java -jar lzma.jar: 查看帮助
+java -jar lzma.jar e a.txt a.lzma: 压缩a.txt到a.lzma
+java -jar lzma.jar d a.lzma a.txt: 解压a.lzma到a.txt
+
+另外也可以用7z官网下载的lzma.exe来压缩和解压缩,但只是windows下用
+**/
 package LzmaSpec
 
 import (
 	"bufio"
 	"errors"
 	"io"
+	"sync/atomic"
 )
 
 type cOutStream struct {
@@ -12,7 +25,7 @@ type cOutStream struct {
 }
 
 func (c *cOutStream) WriteByte(b byte) error {
-	c.Processed++
+	atomic.AddUint64(&c.Processed, 1)
 	return c.File.WriteByte(b)
 }
 
@@ -76,8 +89,11 @@ const (
 	kNumBitModelTotalBits = 11
 	kNumMoveBits          = 5
 
+	uint32One  uint32 = 1
+	uint32Zero uint32 = 0
+
 	probInitVal = cProb((1 << kNumBitModelTotalBits) / 2)
-	kTopValue   = uint32(1) << 24
+	kTopValue   = uint32One << 24
 )
 
 func initProbs(p []cProb) {
@@ -133,7 +149,7 @@ func (c *cRangeDecoder) IsFinishedOK() bool {
 }
 
 func (c *cRangeDecoder) DecodeDirectBits(numBits uint32) (uint32, error) {
-	res := uint32(0)
+	res := uint32Zero
 	for {
 		c.Range >>= 1
 		c.Code -= c.Range
@@ -157,9 +173,8 @@ func (c *cRangeDecoder) DecodeDirectBits(numBits uint32) (uint32, error) {
 }
 
 func (c *cRangeDecoder) DecodeBit(prob *cProb) (uint32, error) {
-	v := uint32(*prob)
+	v, symbol := uint32(*prob), uint32Zero
 	bound := (c.Range >> kNumBitModelTotalBits) * v
-	symbol := uint32(0)
 	if c.Code < bound {
 		v += ((1 << kNumBitModelTotalBits) - v) >> kNumMoveBits
 		c.Range = bound
@@ -170,16 +185,12 @@ func (c *cRangeDecoder) DecodeBit(prob *cProb) (uint32, error) {
 		symbol = 1
 	}
 	*prob = cProb(v)
-	err := c.Normalize()
-	if err != nil {
-		return 0, err
-	}
-	return symbol, nil
+	return symbol, c.Normalize()
 }
 
 func bitTreeReverseDecode(probs []cProb, numBits uint32, rc *cRangeDecoder) (uint32, error) {
-	m, symbol := uint32(1), uint32(0)
-	for i := uint32(0); i < numBits; i++ {
+	m, symbol, i := uint32One, uint32Zero, uint32Zero
+	for ; i < numBits; i++ {
 		bit, err := rc.DecodeBit(&probs[m])
 		if err != nil {
 			return 0, err
@@ -208,15 +219,15 @@ func (c *cBitTreeDecoder) init() {
 }
 
 func (c *cBitTreeDecoder) Decode(rc *cRangeDecoder) (uint32, error) {
-	m := uint32(1)
-	for i := uint32(0); i < c.numBits; i++ {
+	m, i := uint32One, uint32Zero
+	for ; i < c.numBits; i++ {
 		tmp, err := rc.DecodeBit(&c.Probs[m])
 		if err != nil {
 			return 0, err
 		}
 		m = (m << 1) + tmp
 	}
-	return m - (uint32(1) << c.numBits), nil
+	return m - (uint32One << c.numBits), nil
 }
 
 func (c *cBitTreeDecoder) ReverseDecode(rc *cRangeDecoder) (uint32, error) {
@@ -341,8 +352,7 @@ type cLzmaDecoder struct {
 	dictSizeInProperties uint32
 
 	unpackSize uint64
-
-	litProbs []cProb
+	litProbs   []cProb
 
 	posSlotDecoder []*cBitTreeDecoder
 	alignDecoder   *cBitTreeDecoder
@@ -399,10 +409,6 @@ func (c *cLzmaDecoder) init() {
 	c.repLenDecoder.Init()
 }
 
-func (c *cLzmaDecoder) Close() error {
-	return c.outWindow.OutStream.File.Flush()
-}
-
 func (c *cLzmaDecoder) DecodeProperties() (val [5]uint32, unpackSize uint64, unpackSizeDefined bool, err error) {
 	c.header = make([]byte, 13)
 	if _, err = io.ReadFull(c.rangeDec.InStream, c.header); err != nil {
@@ -454,17 +460,17 @@ func (c *cLzmaDecoder) createLiterals() {
 
 func (c *cLzmaDecoder) initLiterals() {
 	num := uint32(0x300) << (c.lc + c.lp)
-	for i := uint32(0); i < num; i++ {
+	for i := uint32Zero; i < num; i++ {
 		c.litProbs[i] = probInitVal
 	}
 }
 
 func (c *cLzmaDecoder) decodeLiteral(state, rep0 uint32) error {
-	prevByte := uint32(0)
+	prevByte := uint32Zero
 	if !c.outWindow.IsEmpty() {
 		prevByte = uint32(c.outWindow.GetByte(1))
 	}
-	symbol := uint32(1)
+	symbol := uint32One
 	litState := ((c.outWindow.TotalPos & ((1 << c.lp) - 1)) << c.lc) + (prevByte >> (8 - c.lc))
 	probs := c.litProbs[uint32(0x300)*litState:]
 	if state >= 7 {
@@ -513,16 +519,17 @@ func (c *cLzmaDecoder) decodeDistance(l uint32) (uint32, error) {
 		return posSlot, nil
 	}
 
+	var tmp uint32
 	numDirectBits := (posSlot >> 1) - 1
 	dist := (2 | (posSlot & 1)) << numDirectBits
 	if posSlot < kEndPosModelIndex {
-		tmp, err := bitTreeReverseDecode(c.posDecoders[dist-posSlot:], numDirectBits, c.rangeDec)
+		tmp, err = bitTreeReverseDecode(c.posDecoders[dist-posSlot:], numDirectBits, c.rangeDec)
 		if err != nil {
 			return 0, err
 		}
 		dist += tmp
 	} else {
-		tmp, err := c.rangeDec.DecodeDirectBits(numDirectBits - kNumAlignBits)
+		tmp, err = c.rangeDec.DecodeDirectBits(numDirectBits - kNumAlignBits)
 		if err != nil {
 			return 0, err
 		}
@@ -542,31 +549,27 @@ const (
 	LzmaResFinishedWithoutMarker = 2
 )
 
-func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, f func(u, p uint64) error) (int, error) {
+func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, unpackSize uint64) (int, error) {
+	defer c.outWindow.OutStream.File.Flush()
+
 	c.create()
-	ok, err := c.rangeDec.Init()
+	isError, err := c.rangeDec.Init()
 	if err != nil {
 		return 0, err
 	}
-	if !ok {
+	if !isError {
 		return LzmaResError, nil
 	}
 	c.init()
-	var rep0, rep1, rep2, rep3, state uint32
-	unpackSize := c.unpackSize
+	var rep0, rep1, rep2, rep3, state, posState, bit, l, dist uint32
 	for {
-		if f != nil {
-			if err = f(c.unpackSize, c.outWindow.OutStream.Processed); err != nil {
-				return 0, err
-			}
-		}
 		if unpackSizeDefined && unpackSize == 0 && !c.markerIsMandatory {
 			if c.rangeDec.IsFinishedOK() {
 				return LzmaResFinishedWithoutMarker, nil
 			}
 		}
-		posState := c.outWindow.TotalPos & ((1 << c.pb) - 1)
-		bit, err := c.rangeDec.DecodeBit(&c.isMatch[(state<<kNumPosBitsMax)+posState])
+		posState = c.outWindow.TotalPos & ((1 << c.pb) - 1)
+		bit, err = c.rangeDec.DecodeBit(&c.isMatch[(state<<kNumPosBitsMax)+posState])
 		if err != nil {
 			return 0, err
 		}
@@ -587,7 +590,7 @@ func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, f func(u, p uint64) error)
 		if err != nil {
 			return 0, err
 		}
-		l := uint32(0)
+		l = uint32Zero
 		if bit != 0 {
 			if unpackSizeDefined && unpackSize == 0 {
 				return LzmaResError, nil
@@ -618,7 +621,7 @@ func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, f func(u, p uint64) error)
 				if err != nil {
 					return 0, err
 				}
-				dist := uint32(0)
+				dist = uint32Zero
 				if bit == 0 {
 					dist = rep1
 				} else {
@@ -670,13 +673,12 @@ func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, f func(u, p uint64) error)
 			}
 		}
 		l += kMatchMinLen
-		isError := false
+		isError = false
 		if unpackSizeDefined && unpackSize < uint64(l) {
 			l = uint32(unpackSize)
 			isError = true
 		}
-		err = c.outWindow.CopyMatch(rep0+1, l)
-		if err != nil {
+		if err = c.outWindow.CopyMatch(rep0+1, l); err != nil {
 			return 0, err
 		}
 		unpackSize -= uint64(l)
@@ -687,7 +689,7 @@ func (c *cLzmaDecoder) Decode(unpackSizeDefined bool, f func(u, p uint64) error)
 }
 
 func (c *cLzmaDecoder) GetOutStreamProcessed() uint64 {
-	return c.outWindow.OutStream.Processed
+	return atomic.LoadUint64(&c.outWindow.OutStream.Processed)
 }
 
 func (c *cLzmaDecoder) IsCorrupted() bool {

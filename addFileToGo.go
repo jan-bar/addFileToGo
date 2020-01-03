@@ -53,7 +53,7 @@ func WriteBytesToFile(path, name string) error {
 		return err
 	}
 	defer zr.Close()
-	fw, err := os.create(path)
+	fw, err := os.Create(path)
 	if err != nil {
 		return err
 	}
