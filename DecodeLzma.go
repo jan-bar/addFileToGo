@@ -2,73 +2,90 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/jan-bar/addFileToGo/LzmaSpec"
 )
 
 func main() {
-	in := flag.String("i", "", "input lzma file")
-	out := flag.String("o", "", "output file")
-	flag.Parse()
-	if *in == "" || *out == "" {
-		flag.Usage()
+	_, err := exec.Command("LzmaSpec/lzma.exe", "e", "LzmaSpec/LZMA.dll", "LZMA.lzma").Output()
+	if err != nil { // 准备一个标准lzma压缩文件
+		fmt.Println(err)
 		return
 	}
-	//err := decoder(*in, *out)
-	//if err != nil {
-	//	fmt.Println(err)
-	//}
-
-	err := decoder2(*in, *out)
-	if err != nil {
-		fmt.Println(err)
+	err = decoder("LZMA.lzma", "LZMA.dll")
+	if err != nil { // 加压标准lzma文件
+		fmt.Println("decoder", err)
+		return
 	}
-
+	err = janbar("LZMA.dll", "LZMA_my.lzma")
+	if err != nil { // 使用库进行自定义压缩解压
+		fmt.Println("janbar", err)
+		return
+	}
 }
 
-func decoder2(input, output string) error {
+// 下面时使用7z提供的接口压缩和解压缩,不是标准,用下面的压缩只能用下面的解压
+// 下面这个属于本人自定义头部,所以压缩后的文件不能使用7z等工具打开
+// 本程序运行完可以执行如下指令确定是否正常运行,如果都正常则说明压缩和解压缩均没有问题
+// diff  LZMA.dll LzmaSpec\LZMA.dll
+// diff  LZMA_my.lzma.1 LZMA_my.lzma.2
+// diff3 LZMA_my.lzma.1.d LZMA_my.lzma.2.d LZMA.dll
+func janbar(input, output string) error {
+	LzmaSpec.LoadLzmaDll("LzmaSpec/LZMA.dll")
+	err := encJanbar(input, output+".1", LzmaSpec.UseDll)
+	if err != nil {
+		return err
+	}
+	err = decJanbar(output+".1", output+".1.d", LzmaSpec.UseDll)
+	if err != nil {
+		return err
+	}
+
+	err = encJanbar(input, output+".2", LzmaSpec.UseCgo)
+	if err != nil {
+		return err
+	}
+	err = decJanbar(output+".2", output+".2.d", LzmaSpec.UseCgo)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func encJanbar(input, output string, useType LzmaSpec.UseType) error {
 	fr, err := os.Open(input)
 	if err != nil {
 		return err
 	}
+	defer fr.Close()
 	fw, err := os.Create(output)
 	if err != nil {
 		return err
 	}
-
-	LzmaSpec.LoadLzmaDll("LzmaSpec/LZMA.dll")
-	err = LzmaSpec.LzmaCompress(fr, fw)
-	if err != nil {
-		return err
-	}
-	fr.Close()
-	fw.Close()
-
-	fr, err = os.Open(output)
-	if err != nil {
-		return err
-	}
-	fw, err = os.Create(input + ".txt")
-	if err != nil {
-		return err
-	}
-	err = LzmaSpec.LzmaUnCompress(fr, fw)
-	if err != nil {
-		return err
-	}
-	fr.Close()
-	fw.Close()
-	return nil
+	defer fw.Close()
+	return LzmaSpec.LzmaCompress(fr, fw, useType)
 }
 
-func decoder(input, output string) error {
-	if input != "" {
-		return nil
+func decJanbar(input, output string, useType LzmaSpec.UseType) error {
+	fr, err := os.Open(input)
+	if err != nil {
+		return err
 	}
+	defer fr.Close()
+	fw, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer fw.Close()
+	return LzmaSpec.LzmaUnCompress(fr, fw, useType)
+}
+
+// 使用lzma.exe,lzma.jar等标准压缩文件,下面时解压逻辑
+func decoder(input, output string) error {
 	fr, err := os.Open(input)
 	if err != nil {
 		return err

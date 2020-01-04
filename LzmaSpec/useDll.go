@@ -11,10 +11,6 @@ dumpbin.exe -exports c:\Util\LZMA.dll
 package LzmaSpec
 
 import (
-	"errors"
-	"fmt"
-	"io"
-	"io/ioutil"
 	"syscall"
 	"unsafe"
 )
@@ -118,7 +114,7 @@ Returns:
 // int fb,        /* 5 <= fb <= 273, default = 32 */
 // int numThreads /* 1 or 2, default = 2 */
 // );
-func lzmaCompress(dst []byte, dstLen *uint64, src []byte, srcLen uint64,
+func lzmaCompressDll(dst []byte, dstLen *uint64, src []byte, srcLen uint64,
 	outProps []byte, outPropsSize *uint64,
 	level, dictSize, lc, lp, pb, fb, numThreads uint32) (int, error) {
 	r1, _, err := compress.Call(
@@ -155,7 +151,7 @@ Returns:
 MY_STDAPI LzmaUncompress(unsigned char *dest, size_t *destLen, const unsigned char *src, SizeT *srcLen,
   const unsigned char *props, size_t propsSize);
 */
-func lzmaUncompress(dst []byte, dstLen *uint64, src []byte, srcLen *uint64,
+func lzmaUncompressDll(dst []byte, dstLen *uint64, src []byte, srcLen *uint64,
 	props []byte, propsSize uint64) (int, error) {
 	r1, _, err := unCompress.Call(
 		uintptr(unsafe.Pointer(&dst[0])), uintptr(unsafe.Pointer(dstLen)),
@@ -165,71 +161,4 @@ func lzmaUncompress(dst []byte, dstLen *uint64, src []byte, srcLen *uint64,
 		return 0, err
 	}
 	return int(r1), nil
-}
-
-func LzmaCompress(r io.Reader, w io.Writer) error {
-	src, err := ioutil.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	var (
-		srcLen    = uint64(len(src))
-		propsSize = LzmaPropsSize
-		dstLen    = srcLen + srcLen/3 + 128
-		dst       = make([]byte, sizeHeader+LzmaPropsSize+dstLen)
-	)
-	copy(dst, setLenBytes(srcLen)) // 保存源文件长度
-	// 同时也保存outProps
-	ret, err := lzmaCompress(dst[sizeHeader+LzmaPropsSize:], &dstLen, src, srcLen,
-		dst[sizeHeader:sizeHeader+LzmaPropsSize], &propsSize, 9, 1<<24, 3, 0, 2, 32, 2)
-	if err != nil {
-		return err
-	}
-	if ret != SzOk {
-		return fmt.Errorf("lzmaCompress ret: %d", ret)
-	}
-	if propsSize != LzmaPropsSize {
-		return errors.New("propsSize error")
-	}
-	_, err = w.Write(dst[:sizeHeader+LzmaPropsSize+dstLen])
-	return err
-}
-
-func LzmaUnCompress(r io.Reader, w io.Writer) error {
-	src, err := ioutil.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	var (
-		srcLen = uint64(len(src)) - sizeHeader - LzmaPropsSize // 去掉头部
-		dstLen = getLenBytes(src[:sizeHeader])                 // 读取源文件大小
-		dst    = make([]byte, dstLen)                          // 申请资源
-	)
-	// 使用r中读到的props传递参数
-	ret, err := lzmaUncompress(dst, &dstLen, src[sizeHeader+LzmaPropsSize:],
-		&srcLen, src[sizeHeader:sizeHeader+LzmaPropsSize], LzmaPropsSize)
-	if err != nil {
-		return err
-	}
-	if ret != SzOk {
-		return fmt.Errorf("lzmaCompress ret: %d", ret)
-	}
-	_, err = w.Write(dst[:dstLen])
-	return err
-}
-
-func getLenBytes(byt []byte) uint64 {
-	size := uint64(0)
-	for i := 0; i < sizeHeader; i++ {
-		size |= uint64(byt[i]) << (8 * i)
-	}
-	return size
-}
-
-func setLenBytes(size uint64) []byte {
-	byt := make([]byte, sizeHeader)
-	for i := 0; i < sizeHeader; i++ {
-		byt[i] = byte(size >> (8 * i))
-	}
-	return byt
 }
