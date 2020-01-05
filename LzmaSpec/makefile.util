@@ -1,4 +1,4 @@
-PROG = libLzma.a
+PROG = libLzmaUtil.a
 CXX = g++
 LIB =
 RM = rm -f
@@ -6,9 +6,9 @@ CFLAGS = -c -O2 -Wall -D_7ZIP_ST
 RANLIB = ranlib
 AR = ar
 # 下面路径填lzma1900.7z解压后那个路径
-SOURCE = \lzma1900\C
+SOURCE = /lzma1900/C
 
-OBJS = Alloc.o LzFind.o LzFindMt.o LzmaEnc.o LzmaDec.o LzmaLib.o Threads.o
+OBJS = LzmaUtil.o Alloc.o LzFind.o LzmaDec.o LzmaEnc.o 7zFile.o 7zStream.o
 
 all: $(PROG)
 
@@ -17,14 +17,14 @@ $(PROG): $(OBJS)
 	$(RANLIB) $(PROG)
 	-$(RM) $(OBJS)
 
+LzmaUtil.o: LzmaUtil.c
+	$(CXX) $(CFLAGS) LzmaUtil.c
+
 Alloc.o: $(SOURCE)/Alloc.c
 	$(CXX) $(CFLAGS) $(SOURCE)/Alloc.c
 
 LzFind.o: $(SOURCE)/LzFind.c
 	$(CXX) $(CFLAGS) $(SOURCE)/LzFind.c
-
-LzFindMt.o: $(SOURCE)/LzFindMt.c
-	$(CXX) $(CFLAGS) $(SOURCE)/LzFindMt.c
 
 LzmaDec.o: $(SOURCE)/LzmaDec.c
 	$(CXX) $(CFLAGS) $(SOURCE)/LzmaDec.c
@@ -32,11 +32,11 @@ LzmaDec.o: $(SOURCE)/LzmaDec.c
 LzmaEnc.o: $(SOURCE)/LzmaEnc.c
 	$(CXX) $(CFLAGS) $(SOURCE)/LzmaEnc.c
 
-LzmaLib.o: $(SOURCE)/LzmaLib.c
-	$(CXX) $(CFLAGS) $(SOURCE)/LzmaLib.c
+7zFile.o: $(SOURCE)/7zFile.c
+	$(CXX) $(CFLAGS) $(SOURCE)/7zFile.c
 
-Threads.o: $(SOURCE)/Threads.c
-	$(CXX) $(CFLAGS) $(SOURCE)/Threads.c
+7zStream.o: $(SOURCE)/7zStream.c
+	$(CXX) $(CFLAGS) $(SOURCE)/7zStream.c
 
 clean:
 	-$(RM) $(PROG) $(OBJS)

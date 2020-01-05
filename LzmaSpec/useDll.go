@@ -151,7 +151,7 @@ Returns:
 MY_STDAPI LzmaUncompress(unsigned char *dest, size_t *destLen, const unsigned char *src, SizeT *srcLen,
   const unsigned char *props, size_t propsSize);
 */
-func lzmaUncompressDll(dst []byte, dstLen *uint64, src []byte, srcLen *uint64,
+func lzmaUnCompressDll(dst []byte, dstLen *uint64, src []byte, srcLen *uint64,
 	props []byte, propsSize uint64) (int, error) {
 	r1, _, err := unCompress.Call(
 		uintptr(unsafe.Pointer(&dst[0])), uintptr(unsafe.Pointer(dstLen)),

@@ -1,7 +1,6 @@
 package LzmaSpec
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -24,37 +23,33 @@ const (
 	SzErrorThread      = 12
 	SzErrorArchive     = 16
 	SzErrorNoArchive   = 17
-)
 
-const (
-	LzmaPropsSize = uint64(5)
-
-	sizeHeader = 8
+	lzmaPropsSize = uint64(5)
+	sizeHeader    = 8
 )
 
 func getLenBytes(byt []byte) uint64 {
-	size := uint64(0)
+	var size uint64
 	for i := 0; i < sizeHeader; i++ {
 		size |= uint64(byt[i]) << (8 * i)
 	}
 	return size
 }
 
-func setLenBytes(size uint64) []byte {
-	byt := make([]byte, sizeHeader)
+func setLenBytes(byt []byte, size uint64) {
 	for i := 0; i < sizeHeader; i++ {
 		byt[i] = byte(size >> (8 * i))
 	}
-	return byt
 }
 
 type UseType byte
 
 const (
-	UseDll = 1
-	UseCgo = 2
+	UseDll UseType = 1
+	UseCgo UseType = 2
 )
 
+// write {[5]byte porps} + {[8]byte fileLen} + {data}
 func LzmaCompress(r io.Reader, w io.Writer, useType UseType) error {
 	src, err := ioutil.ReadAll(r)
 	if err != nil {
@@ -62,61 +57,71 @@ func LzmaCompress(r io.Reader, w io.Writer, useType UseType) error {
 	}
 	var (
 		srcLen    = uint64(len(src))
-		propsSize = LzmaPropsSize
-		dstLen    = srcLen + srcLen/3 + 128
-		dst       = make([]byte, sizeHeader+LzmaPropsSize+dstLen)
+		dstLen    = srcLen + srcLen/3 + 128 // 网上找了很多地方,都是这样算出来的
+		dst       = make([]byte, lzmaPropsSize+sizeHeader+dstLen)
+		propsSize = lzmaPropsSize
 		ret       = -1
 	)
-	copy(dst, setLenBytes(srcLen)) // 保存源文件长度
+	setLenBytes(dst[lzmaPropsSize:], srcLen) // 保存源文件长度
 
 	switch useType { // outProps也需要保存
 	case UseDll:
-		ret, err = lzmaCompressDll(dst[sizeHeader+LzmaPropsSize:], &dstLen, src, srcLen,
-			dst[sizeHeader:sizeHeader+LzmaPropsSize], &propsSize, 9, 1<<24, 3, 0, 2, 32, 2)
+		ret, err = lzmaCompressDll(dst[lzmaPropsSize+sizeHeader:], &dstLen, src, srcLen,
+			dst[:lzmaPropsSize], &propsSize, 9, 1<<24, 3, 0, 2, 32, 2)
 		if err != nil {
 			return err
 		}
 	case UseCgo:
-		ret = lzmaCompressCgo(dst[sizeHeader+LzmaPropsSize:], &dstLen, src, srcLen,
-			dst[sizeHeader:sizeHeader+LzmaPropsSize], &propsSize, 9, 1<<24, 3, 0, 2, 32, 2)
+		ret = lzmaCompressCgo(dst[lzmaPropsSize+sizeHeader:], &dstLen, src, srcLen,
+			dst[:lzmaPropsSize], &propsSize, 9, 1<<24, 3, 0, 2, 32, 2)
 	default:
 		return fmt.Errorf("useType error: %d", useType)
 	}
 	if ret != SzOk {
 		return fmt.Errorf("lzmaCompress ret: %d", ret)
 	}
-	if propsSize != LzmaPropsSize {
-		return errors.New("propsSize error")
+	if propsSize != lzmaPropsSize {
+		return fmt.Errorf("propsSize error")
 	}
-	_, err = w.Write(dst[:sizeHeader+LzmaPropsSize+dstLen])
+	dstLen += lzmaPropsSize + sizeHeader
+	ret, err = w.Write(dst[:dstLen])
+	if uint64(ret) != dstLen && err == nil {
+		return io.ErrShortWrite
+	}
 	return err
 }
 
+// read {[5]byte porps} + {[8]byte fileLen} + {data}
 func LzmaUnCompress(r io.Reader, w io.Writer, useType UseType) error {
 	src, err := ioutil.ReadAll(r)
 	if err != nil {
 		return err
 	}
 	var (
-		srcLen = uint64(len(src)) - sizeHeader - LzmaPropsSize // 去掉头部
-		dstLen = getLenBytes(src[:sizeHeader])                 // 读取源文件大小
-		dst    = make([]byte, dstLen)                          // 申请资源
+		dstLen = getLenBytes(src[lzmaPropsSize:]) // 读取源文件大小
+		dst    = make([]byte, dstLen)             // 申请资源
 		ret    = -1
+		srcLen = uint64(len(src)) - lzmaPropsSize - sizeHeader // 去掉头部
 	)
 	switch useType { // 使用r中读到的props传递参数
 	case UseDll:
-		ret, err = lzmaUncompressDll(dst, &dstLen, src[sizeHeader+LzmaPropsSize:],
-			&srcLen, src[sizeHeader:sizeHeader+LzmaPropsSize], LzmaPropsSize)
+		ret, err = lzmaUnCompressDll(dst, &dstLen, src[lzmaPropsSize+sizeHeader:],
+			&srcLen, src[:lzmaPropsSize], lzmaPropsSize)
 		if err != nil {
 			return err
 		}
 	case UseCgo:
-		ret = lzmaUncompressCgo(dst, &dstLen, src[sizeHeader+LzmaPropsSize:],
-			&srcLen, src[sizeHeader:sizeHeader+LzmaPropsSize], LzmaPropsSize)
+		ret = lzmaUnCompressCgo(dst, &dstLen, src[lzmaPropsSize+sizeHeader:],
+			&srcLen, src[:lzmaPropsSize], lzmaPropsSize)
+	default:
+		return fmt.Errorf("useType error: %d", useType)
 	}
 	if ret != SzOk {
-		return fmt.Errorf("lzmaCompress ret: %d", ret)
+		return fmt.Errorf("lzmaUnCompress ret: %d", ret)
 	}
-	_, err = w.Write(dst[:dstLen])
+	ret, err = w.Write(dst[:dstLen])
+	if uint64(ret) != dstLen && err == nil {
+		return io.ErrShortWrite
+	}
 	return err
 }

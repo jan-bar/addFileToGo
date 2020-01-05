@@ -4,36 +4,42 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/jan-bar/addFileToGo/LzmaSpec"
 )
 
 func main() {
-	_, err := exec.Command("LzmaSpec/lzma.exe", "e", "LzmaSpec/LZMA.dll", "LZMA.lzma").Output()
-	if err != nil { // 准备一个标准lzma压缩文件
-		fmt.Println(err)
-		return
-	}
-	err = decoder("LZMA.lzma", "LZMA.dll")
+	// LzmaSpec\lzma.exe e test.txt LZMA.lzma
+	// java -jar LzmaSpec\lzma.jar e test.txt LZMA.lzma
+	err := decoder("LZMA.lzma", "test.txt")
 	if err != nil { // 加压标准lzma文件
 		fmt.Println("decoder", err)
 		return
 	}
-	err = janbar("LZMA.dll", "LZMA_my.lzma")
+	err = janbar("test.txt", "LZMA_my.lzma")
 	if err != nil { // 使用库进行自定义压缩解压
 		fmt.Println("janbar", err)
 		return
 	}
+	err = lzmaUtil("test.txt", "LZMA_util.lzma")
+	if err != nil { // 使用库进行自定义压缩解压
+		fmt.Println("lzmaUtil", err)
+		return
+	}
 }
 
-// 下面时使用7z提供的接口压缩和解压缩,不是标准,用下面的压缩只能用下面的解压
-// 下面这个属于本人自定义头部,所以压缩后的文件不能使用7z等工具打开
-// 本程序运行完可以执行如下指令确定是否正常运行,如果都正常则说明压缩和解压缩均没有问题
-// diff  LZMA.dll LzmaSpec\LZMA.dll
-// diff  LZMA_my.lzma.1 LZMA_my.lzma.2
-// diff3 LZMA_my.lzma.1.d LZMA_my.lzma.2.d LZMA.dll
+func lzmaUtil(input, output string) error {
+	err := LzmaSpec.LzmaCompressUtil(input, output, LzmaSpec.UtilEnc)
+	if err != nil {
+		return err
+	}
+	return LzmaSpec.LzmaCompressUtil(output, output+".d", LzmaSpec.UtilDec)
+}
+
+// 下面时使用7z提供的接口压缩和解压缩
+// diff  LZMA_my.lzma.1 LZMA_my.lzma.2 // 这两个也是压缩文件可以用7z打开查看详情
+// diff3 LZMA_my.lzma.1.d LZMA_my.lzma.2.d test.txt
 func janbar(input, output string) error {
 	LzmaSpec.LoadLzmaDll("LzmaSpec/LZMA.dll")
 	err := encJanbar(input, output+".1", LzmaSpec.UseDll)
