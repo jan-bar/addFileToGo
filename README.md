@@ -40,6 +40,11 @@ func main() {
 1. 使用7za命令将多个文件压缩成一个文件,使用addFileToGo将文件写入go代码
 2. 使用go代码释放文件,使用7za命令行解压即可
 
+# 使用lzma库
+1. 提供了接口通过windows的dll调用lzmalib库
+2. 提供了接口通过windows的cgo调用lzmalib库
+3. 修改LzmaUtil.c文件提供通用接口,windows和Linux都可以支持
+
 # 总结
 1. 之所以7za没有做成复杂的封装好的方法,是因为提供基础方法使用灵活,还有懒.
 2. 写这个也主要是平时我写的程序需要携带文件,避免使用者那边没有必要文件.
