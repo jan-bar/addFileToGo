@@ -108,7 +108,7 @@ func writeDataToFile(fw io.Writer, file string) error {
 
 	bw := base64.NewEncoder(base64.RawStdEncoding, fw)
 	defer bw.Close()
-	zw := zlib.NewWriter(bw)
+	zw, _ := zlib.NewWriterLevel(bw, zlib.BestCompression)
 	defer zw.Close()
 	_, err = io.Copy(zw, fr)
 	return err
